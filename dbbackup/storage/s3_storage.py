@@ -49,26 +49,27 @@ class Storage(BaseStorage):
     def list_directory(self):
         return [k.name for k in self.bucket.list(prefix=self.S3_DIRECTORY)]
 
-    def write_file(self, filehandle, filename):
+    def write_file(self, file_path):
         # Use multipart upload because normal upload maximum is 5 GB.
-        filepath = os.path.join(self.S3_DIRECTORY, filename)
-        filehandle.seek(0)
-        handle = self.bucket.initiate_multipart_upload(filepath)
-        try:
-            chunk = 1
-            while True:
-                chunkdata = filehandle.read(5 * 1024 * 1024)
-                if not chunkdata:
-                    break
-                tmpfile = BytesIO(chunkdata)
-                tmpfile.seek(0)
-                handle.upload_part_from_file(tmpfile, chunk)
-                tmpfile.close()
-                chunk += 1
-            handle.complete_upload()
-        except Exception:
-            handle.cancel_upload()
-            raise
+        filepath = os.path.join(self.S3_DIRECTORY, os.path.basename(file_path))
+
+        with open(file_path, 'rb') as f:
+            handle = self.bucket.initiate_multipart_upload(filepath)
+            try:
+                chunk = 1
+                while True:
+                    chunkdata = f.read(5 * 1024 * 1024)
+                    if not chunkdata:
+                        break
+                    tmpfile = BytesIO(chunkdata)
+                    tmpfile.seek(0)
+                    handle.upload_part_from_file(tmpfile, chunk)
+                    tmpfile.close()
+                    chunk += 1
+                handle.complete_upload()
+            except Exception:
+                handle.cancel_upload()
+                raise
 
     def read_file(self, filepath):
         """ Read the specified file and return it's handle. """

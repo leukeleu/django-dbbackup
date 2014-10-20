@@ -1,17 +1,18 @@
 """
 Save backup files to Dropbox.
 """
-from __future__ import (absolute_import, division,
-                        print_function, unicode_literals)
-import re
-import datetime
+from __future__ import absolute_import, division, print_function, unicode_literals
+
+import os
+import shutil
 import tempfile
 import gzip
+from optparse import make_option
+
 from django.conf import settings
 from django.core.management.base import BaseCommand
 from django.core.management.base import CommandError
 from django.core.management.base import LabelCommand
-from optparse import make_option
 
 from dbbackup import utils
 from dbbackup.dbcommands import DBCommands
@@ -38,8 +39,8 @@ class Command(LabelCommand):
             self.clean = options.get('clean')
             self.clean_keep = getattr(settings, 'DBBACKUP_CLEANUP_KEEP', 10)
             self.database = options.get('database')
-            self.servername = options.get('servername')
-            self.backup_extension = options.get('backup-extension') or 'backup'
+            self.servername = options.get('servername') or dbbackup_settings.SERVER_NAME
+            self.backup_extension = options.get('backup-extension') or None
             self.compress = options.get('compress')
             self.encrypt = options.get('encrypt')
             self.storage = BaseStorage.storage_factory()
@@ -49,56 +50,76 @@ class Command(LabelCommand):
                 database_keys = dbbackup_settings.DATABASES
             for database_key in database_keys:
                 database = settings.DATABASES[database_key]
+                database_name = database['NAME']
+
                 self.dbcommands = DBCommands(database)
-                self.save_new_backup(database, database_key)
-                self.cleanup_old_backups(database)
+                self.save_new_backup(database_name)
+
+                if self.clean:
+                    self.cleanup_old_backups(database_name)
         except StorageError as err:
             raise CommandError(err)
 
-    def save_new_backup(self, database, database_name):
+    def save_new_backup(self, database_name):
         """ Save a new backup file. """
-        print("Backing Up Database: %s" % database['NAME'])
-        filename = database_name + ".backup"
-        outputfile = tempfile.SpooledTemporaryFile(max_size=10 * 1024 * 1024)
-        #outputfile.name = self.dbcommands.filename(self.servername)
-        self.dbcommands.run_backup_commands(outputfile)
-        if self.compress:
-            compressed_file = self.compress_file(outputfile)
-            outputfile.close()
-            outputfile = compressed_file
-        if self.encrypt:
-            encrypted_file = utils.encrypt_file(outputfile)
-            outputfile = encrypted_file
-        print("  Backup tempfile created: %s" % (utils.handle_size(outputfile)))
-        print("  Writing file to %s: %s, filename: %s" % (self.storage.name, self.storage.backup_dir, filename))
-        self.storage.write_file(outputfile, filename)
+        print("Backing Up Database: %s" % database_name)
 
-    def cleanup_old_backups(self, database):
+        temp_dir = tempfile.mkdtemp(prefix='backup')
+        try:
+            backup_extension = self.backup_extension or self.dbcommands.settings.extension
+
+            backup_file = os.path.join(
+                temp_dir,
+                utils.generate_backup_filename(database_name, self.servername, backup_extension)
+            )
+
+            with open(backup_file, 'wb') as f:
+                self.dbcommands.run_backup_commands(f)
+
+            if self.compress:
+                backup_file = self.compress_file(backup_file)
+
+            if self.encrypt:
+                backup_file = utils.encrypt_file(backup_file)
+
+            print("  Backup tempfile created: %s" % (utils.handle_size(backup_file)))
+            print("  Writing file to %s: %s" % (self.storage.name, backup_file))
+
+            self.storage.write_file(backup_file)
+        finally:
+            shutil.rmtree(temp_dir)
+
+    def cleanup_old_backups(self, database_name):
         """ Cleanup old backups, keeping the number of backups specified by
             DBBACKUP_CLEANUP_KEEP and any backups that occur on first of the month.
         """
-        if self.clean:
-            print("Cleaning Old Backups for: %s" % database['NAME'])
-            filepaths = self.storage.list_directory()
-            filepaths = self.dbcommands.filter_filepaths(filepaths)
-            for filepath in sorted(filepaths[0:-self.clean_keep]):
-                regex = r'^%s' % self.dbcommands.filename_match(self.servername, '(.*?)')
-                datestr = re.findall(regex, filepath)[0]
-                dateTime = datetime.datetime.strptime(datestr, dbbackup_settings.DATE_FORMAT)
-                if int(dateTime.strftime("%d")) != 1:
-                    print("  Deleting: %s" % filepath)
-                    self.storage.delete_file(filepath)
+        print("Cleaning Old Backups for: %s" % database_name)
 
-    def compress_file(self, inputfile):
+        file_list = utils.get_backup_file_list(
+            database_name,
+            self.servername,
+            self.dbcommands.settings.extension,
+            self.storage
+        )
+
+        for backup_date, filename in sorted(file_list[0:-self.clean_keep]):
+            if int(backup_date.strftime("%d")) != 1:
+                print("  Deleting: %s" % filename)
+                #self.storage.delete_file(filepath)
+
+    def compress_file(self, input_path):
         """ Compress this file using gzip.
-            The input and the output are filelike objects.
+            The input and the output are paths.
         """
-        outputfile = tempfile.SpooledTemporaryFile(max_size=10 * 1024 * 1024)
-        outputfile.name = inputfile.name + '.gz'
-        zipfile = gzip.GzipFile(fileobj=outputfile, mode="wb")
-        try:
-            inputfile.seek(0)
-            zipfile.write(inputfile.read())
-        finally:
-            zipfile.close()
-        return outputfile
+        output_path = input_path + '.gz'
+
+        with open(output_path, 'wb') as output_f:
+            zipfile = gzip.GzipFile(fileobj=output_f, mode="wb")
+
+            try:
+                with open(input_path) as input_f:
+                    zipfile.write(input_f.read())
+            finally:
+                zipfile.close()
+
+        return output_path

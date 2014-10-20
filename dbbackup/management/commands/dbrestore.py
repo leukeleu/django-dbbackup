@@ -78,7 +78,7 @@ class Command(LabelCommand):
             filepaths = self.storage.list_directory()
             filepaths = list(filter(lambda f: f.endswith('.' + self.backup_extension), filepaths))
             if not filepaths:
-                raise CommandError("No backup files found in: /%s" % self.storage.backup_dir)
+                raise CommandError("No backup files found in: /%s" % self.storage.backup_dir())
             self.filepath = filepaths[-1]
         # Restore the specified filepath backup
         print("  Restoring: %s" % self.filepath)

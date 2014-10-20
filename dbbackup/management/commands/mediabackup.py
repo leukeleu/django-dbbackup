@@ -1,12 +1,11 @@
-from __future__ import (absolute_import, division,
-                        print_function, unicode_literals)
+from __future__ import absolute_import, division, print_function, unicode_literals
+
 import os
 import sys
-from datetime import datetime
 import tarfile
 import tempfile
 from optparse import make_option
-import re
+import shutil
 
 from django.conf import settings
 from django.core.management.base import BaseCommand
@@ -45,50 +44,47 @@ class Command(BaseCommand):
         if not source_dir:
             print("No media source dir configured.")
             sys.exit(0)
-        print("Backing up media files in %s" % source_dir)
-        output_file = self.create_backup_file(source_dir, self.get_backup_basename())
 
-        if encrypt:
-            encrypted_file = utils.encrypt_file(output_file)
-            output_file = encrypted_file
+        temp_dir = tempfile.mkdtemp(prefix='backup')
+        try:
+            print("Backing up media files in %s" % source_dir)
 
-        print("  Backup tempfile created: %s (%s)" % (output_file.name, utils.handle_size(output_file)))
-        print("  Writing file to %s: %s" % (self.storage.name, self.storage.backup_dir))
-        self.storage.write_file(output_file, self.get_backup_basename())
+            output_file = os.path.join(temp_dir, self.get_backup_basename())
+
+            self.create_backup_file(source_dir, output_file)
+
+            if encrypt:
+                encrypted_file = utils.encrypt_file(output_file)
+                output_file = encrypted_file
+
+            print("  Backup tempfile created: %s (%s)" % (output_file, utils.handle_size(output_file)))
+            print("  Writing file to %s: %s" % (self.storage.name, output_file))
+            self.storage.write_file(output_file)
+        finally:
+            shutil.rmtree(temp_dir)
 
     def get_backup_basename(self):
-        # TODO: use DBBACKUP_FILENAME_TEMPLATE
-        server_name = self.get_servername()
-        if server_name:
-            server_name = '-%s' % server_name
-
-        return '%s%s-%s.media.tar.gz' % (
+        return utils.generate_backup_filename(
             self.get_databasename(),
-            server_name,
-            datetime.now().strftime(dbbackup_settings.DATE_FORMAT)
+            self.get_servername(),
+            'media.tar.gz'
         )
 
     def get_databasename(self):
         # TODO: WTF is this??
         return settings.DATABASES['default']['NAME']
 
-    def create_backup_file(self, source_dir, backup_basename):
-        temp_dir = tempfile.mkdtemp()
+    def create_backup_file(self, source_dir, archive_file):
+        """
+        Create an archive of the files in the source dir.
+        - backup_basename: name of the archive file
+        - archive_file: full path of the archive file
+        """
+        tar_file = tarfile.open(archive_file, 'w|gz')
         try:
-            backup_filename = os.path.join(temp_dir, backup_basename)
-            try:
-                tar_file = tarfile.open(backup_filename, 'w|gz')
-                try:
-                    tar_file.add(source_dir)
-                finally:
-                    tar_file.close()
-
-                return utils.create_spooled_temporary_file(backup_filename)
-            finally:
-                if os.path.exists(backup_filename):
-                    os.remove(backup_filename)
+            tar_file.add(source_dir)
         finally:
-            os.rmdir(temp_dir)
+            tar_file.close()
 
     def get_source_dir(self):
         return dbbackup_settings.MEDIA_PATH
@@ -99,36 +95,17 @@ class Command(BaseCommand):
         """
         print("Cleaning Old Backups for media files")
 
-        file_list = self.get_backup_file_list()
+        file_list = utils.get_backup_file_list(
+            self.get_databasename(),
+            self.get_servername(),
+            self.storage,
+            'media.tar.gz'
+        )
 
         for backup_date, filename in file_list[0:-dbbackup_settings.CLEANUP_KEEP_MEDIA]:
             if int(backup_date.strftime("%d")) != 1:
                 print("  Deleting: %s" % filename)
                 self.storage.delete_file(filename)
-
-    def get_backup_file_list(self):
-        """ Return a list of backup files including the backup date. The result is a list of tuples (datetime, filename).
-            The list is sorted by date.
-        """
-        server_name = self.get_servername()
-        if server_name:
-            server_name = '-%s' % server_name
-
-        media_re = re.compile(r'^%s%s-(.*)\.media\.tar\.gz' % (self.get_databasename(), server_name))
-
-        def is_media_backup(filename):
-            return media_re.search(filename)
-
-        def get_datetime_from_filename(filename):
-            datestr = re.findall(media_re, filename)[0]
-            return datetime.strptime(datestr, dbbackup_settings.DATE_FORMAT)
-
-        file_list = [
-            (get_datetime_from_filename(f), f)
-            for f in self.storage.list_directory()
-            if is_media_backup(f)
-        ]
-        return sorted(file_list, key=lambda v: v[0])
 
     def get_servername(self):
         return self.servername or dbbackup_settings.SERVER_NAME

@@ -49,7 +49,7 @@ class BaseStorage:
     def list_backups(self, database):
         raise StorageError("Programming Error: list_backups() not defined.")
 
-    def write_file(self, filehandle, filename):
+    def write_file(self, file_path):
         raise StorageError("Programming Error: write_file() not defined.")
 
     def read_file(self, filepath):

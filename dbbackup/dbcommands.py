@@ -20,6 +20,7 @@ from dbbackup import settings
 
 class BaseEngineSettings:
     """Base settings for a database engine"""
+    extension = 'backup'
 
     def __init__(self, database):
         self.database = database
@@ -80,6 +81,8 @@ class MySQLSettings(BaseEngineSettings):
 
 class PostgreSQLSettings(BaseEngineSettings):
     """Settings for the PostgreSQL database engine"""
+
+    extension = 'psql'
 
     def get_backup_commands(self):
         backup_commands = settings.POSTGRESQL_BACKUP_COMMANDS
