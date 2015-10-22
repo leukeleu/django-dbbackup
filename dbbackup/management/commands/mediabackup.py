@@ -98,8 +98,8 @@ class Command(BaseCommand):
         file_list = utils.get_backup_file_list(
             self.get_databasename(),
             self.get_servername(),
-            self.storage,
-            'media.tar.gz'
+            'media.tar.gz',
+            self.storage
         )
 
         for backup_date, filename in file_list[0:-dbbackup_settings.CLEANUP_KEEP_MEDIA]:
