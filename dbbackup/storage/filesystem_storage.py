@@ -36,24 +36,25 @@ class Storage(BaseStorage):
 
     def delete_file(self, filepath):
         """ Delete the specified filepath. """
-        os.unlink(filepath)
+        os.unlink(
+            os.path.join(self.backup_dir, filepath)
+        )
 
     def list_directory(self):
         """ List all stored backups for the specified. """
-        filepaths = os.listdir(self.backup_dir)
-        filepaths = [os.path.join(self.backup_dir, path) for path in filepaths]
-        return sorted(filter(os.path.isfile, filepaths))
+        return os.listdir(self.backup_dir)
 
-    def write_file(self, filehandle, filename):
+    def write_file(self, source_file):
         """ Write the specified file. """
-        filehandle.seek(0)
-        backuppath = os.path.join(self.backup_dir, filename)
-        backupfile = open(backuppath, 'wb')
-        data = filehandle.read(1024)
-        while data:
-            backupfile.write(data)
-            data = filehandle.read(1024)
-        backupfile.close()
+        basename = os.path.basename(source_file)
+        backuppath = os.path.join(self.backup_dir, basename)
+
+        with open(source_file) as source_handle:
+            with open(backuppath, 'wb') as target_handle:
+                data = source_handle.read(1024)
+                while data:
+                    target_handle.write(data)
+                    data = source_handle.read(1024)
 
     def read_file(self, filepath):
         """ Read the specified file and return it's handle. """
