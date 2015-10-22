@@ -55,6 +55,10 @@ class Command(BaseCommand):
 
             if encrypt:
                 encrypted_file = utils.encrypt_file(output_file)
+
+                # remove previous file to save disk space
+                os.remove(output_file)
+
                 output_file = encrypted_file
 
             print("  Backup tempfile created: %s (%s)" % (output_file, utils.handle_size(output_file)))
