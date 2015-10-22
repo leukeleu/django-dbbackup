@@ -105,7 +105,7 @@ class Command(LabelCommand):
         for backup_date, filename in sorted(file_list[0:-self.clean_keep]):
             if int(backup_date.strftime("%d")) != 1:
                 print("  Deleting: %s" % filename)
-                #self.storage.delete_file(filepath)
+                self.storage.delete_file(filename)
 
     def compress_file(self, input_path):
         """ Compress this file using gzip.
